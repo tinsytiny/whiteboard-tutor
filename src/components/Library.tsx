@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, MessagesSquare, Plus, Search, Trash2, Eye } from "lucide-react";
+import { Clapperboard, FileText, MessagesSquare, Plus, Search, Trash2, Eye } from "lucide-react";
 import { useState } from "react";
 import type { StoredFile } from "@/lib/files";
 import type { SavedLesson } from "@/lib/store";
@@ -20,6 +20,7 @@ type Props = {
   lessons: SavedLesson[];
   files: StoredFile[];
   onOpenLesson: (lesson: SavedLesson) => void;
+  onWatchLesson: (lesson: SavedLesson) => void;
   onDeleteLesson: (id: string) => void;
   onUseFile: (file: StoredFile) => void;
   onViewFile: (file: StoredFile) => void;
@@ -27,7 +28,7 @@ type Props = {
 };
 
 /** Past lessons and the pages you've brought in, kept in this browser. */
-export function Library({ lessons, files, onOpenLesson, onDeleteLesson, onUseFile, onViewFile, onDeleteFile }: Props) {
+export function Library({ lessons, files, onOpenLesson, onWatchLesson, onDeleteLesson, onUseFile, onViewFile, onDeleteFile }: Props) {
   const [tab, setTab] = useState<"lessons" | "files">("lessons");
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
@@ -79,6 +80,9 @@ export function Library({ lessons, files, onOpenLesson, onDeleteLesson, onUseFil
                       {pages > 0 && ` · ${pages} ${pages === 1 ? "page" : "pages"}`}
                       {l.recap && " · recap"}
                     </span>
+                  </button>
+                  <button type="button" onClick={() => onWatchLesson(l)} aria-label={`Watch as a video: ${l.title}`} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-accent transition-colors hover:bg-accent-soft">
+                    <Clapperboard size={16} aria-hidden /> <span className="hidden sm:inline">Video</span>
                   </button>
                   <button type="button" onClick={() => onDeleteLesson(l.id)} aria-label={`Delete lesson: ${l.title}`} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:text-danger">
                     <Trash2 size={16} aria-hidden />

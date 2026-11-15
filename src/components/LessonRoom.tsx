@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowUp, BookOpen, Library as LibraryIcon, FileText, GraduationCap, Hand, Lightbulb, ListChecks, Mic, Paperclip, Play, Plus, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, BookOpen, Clapperboard, Library as LibraryIcon, FileText, GraduationCap, Hand, Lightbulb, ListChecks, Mic, Paperclip, Play, Plus, Volume2, VolumeX, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ATTACH_MAX_BYTES, ATTACH_MAX_FILES, ATTACH_TYPES, readActions, type Attachment, type BoardAction, type LessonMode, type Turn } from "@/lib/board";
 import { APP_NAME } from "@/lib/brand";
@@ -8,6 +8,8 @@ import type { Recap } from "@/lib/recap";
 import { getFiles, keepFile, listFiles, removeFile, viewFile, type StoredFile } from "@/lib/files";
 import { deleteLesson, loadLessons, saveLesson, type SavedLesson } from "@/lib/store";
 import { Library } from "./Library";
+import { VideoPlayer } from "./VideoPlayer";
+import { canSpeak, speak, unlockSpeech, VOICE_KEY } from "@/lib/speech";
 import { Board, isBoardAction } from "./Board";
 import { RecapView } from "./RecapView";
 
@@ -35,47 +37,6 @@ function toBase64(file: File): Promise<string> {
     r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
     r.onerror = () => reject(r.error);
     r.readAsDataURL(file);
-  });
-}
-
-const VOICE_KEY = "tutor.voice.v1";
-const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window;
-
-/** The clearest English voice the device has: Apple's enhanced voices, then Google's, then any English. */
-function bestVoice(): SpeechSynthesisVoice | undefined {
-  const voices = window.speechSynthesis.getVoices().filter((v) => /^en/i.test(v.lang));
-  const rank = (v: SpeechSynthesisVoice) =>
-    (/premium|enhanced|natural|neural/i.test(v.name) ? 4 : 0) + (/google|samantha|daniel|karen|serena|ava|zoe/i.test(v.name) ? 2 : 0) + (v.localService ? 1 : 0);
-  return voices.sort((a, b) => rank(b) - rank(a))[0];
-}
-
-/**
- * iPad and iPhone Safari only allow speech that starts from a tap. Calling this
- * inside a tap (send, the sound button, replay) unlocks speech for the lesson
- * that follows, even though the tutor's words arrive a moment later.
- */
-function unlockSpeech() {
-  if (!canSpeak()) return;
-  const u = new SpeechSynthesisUtterance(" ");
-  u.volume = 0;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
-}
-
-function speak(text: string, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (!canSpeak() || signal?.aborted) return resolve();
-    const u = new SpeechSynthesisUtterance(text);
-    const voice = bestVoice();
-    if (voice) u.voice = voice;
-    u.rate = 1.02;
-    // Some browsers never fire "end", so don't let the board wait forever.
-    const guard = setTimeout(done, 2500 + text.length * 110);
-    function done() { clearTimeout(guard); signal?.removeEventListener("abort", done); resolve(); }
-    u.onend = done;
-    u.onerror = done;
-    signal?.addEventListener("abort", done);
-    window.speechSynthesis.speak(u);
   });
 }
 
@@ -124,6 +85,7 @@ export function LessonRoom() {
   const [saved, setSaved] = useState<SavedLesson[]>([]);
   const [kept, setKept] = useState<StoredFile[]>([]);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [video, setVideo] = useState<{ turns: Turn[]; title: string } | null>(null);
   const [recap, setRecap] = useState<Recap | null>(null);
   const [recapSample, setRecapSample] = useState(false);
   const [recapState, setRecapState] = useState<"idle" | "loading" | "error">("idle");
@@ -445,12 +407,21 @@ export function LessonRoom() {
       lessons={saved}
       files={kept}
       onOpenLesson={open}
+      onWatchLesson={(l) => { setLibraryOpen(false); interrupt(); setVideo({ turns: l.turns, title: l.title }); }}
       onDeleteLesson={(id) => setSaved(deleteLesson(id))}
       onUseFile={addFromLibrary}
       onViewFile={viewFile}
       onDeleteFile={forgetFile}
     />
   );
+
+  const watch = () => {
+    interrupt();
+    const kept = turns.current.filter((t) => t.role === "student" || t.actions.length > 0);
+    setVideo({ turns: kept, title: titleOf(kept) });
+  };
+
+  const player = video && <VideoPlayer turns={video.turns} title={video.title} onClose={() => setVideo(null)} />;
 
   const drawer = libraryOpen && (
     <div className="fixed inset-0 z-20 flex justify-end" role="dialog" aria-modal="true" aria-label="Library" onKeyDown={(e) => { if (e.key === "Escape") setLibraryOpen(false); }}>
@@ -508,6 +479,7 @@ export function LessonRoom() {
           <p className="mt-3 text-sm text-muted">Paste or drop in a PDF or a picture of your notes, for example pages exported or copied from Notability.</p>
         </div>
         {library}
+        {player}
       </main>
     );
   }
@@ -521,6 +493,7 @@ export function LessonRoom() {
         ) : (
           <>
             {soundButton}
+            <button type="button" onClick={watch} disabled={!hasLesson || busy} className={`${BTN} border-accent text-accent`}><Clapperboard size={16} aria-hidden /> Video</button>
             <button type="button" onClick={() => void replay()} disabled={!hasLesson || replaying} className={BTN}><Play size={16} aria-hidden /> <span className="hidden sm:inline">Replay</span><span className="sr-only sm:hidden">Replay</span></button>
             <button type="button" onClick={() => void finish()} disabled={!hasLesson} className={BTN}><ListChecks size={16} aria-hidden /> Recap</button>
           </>
@@ -544,7 +517,7 @@ export function LessonRoom() {
           </div>
         )}
         {recap && <RecapView recap={recap} sample={recapSample} />}
-        {drawer}
+        {drawer}{player}
       </main>
     );
   }
@@ -589,7 +562,7 @@ export function LessonRoom() {
           {inputBar}
         </div>
       </aside>
-      {drawer}
+      {drawer}{player}
     </main>
   );
 }

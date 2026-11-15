@@ -13,7 +13,7 @@ function Maths({ tex }: { tex: string }) {
   return <div className="board-math overflow-x-auto py-1 text-base text-ink sm:text-xl" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function Item({ a }: { a: BoardAction }) {
+export function Item({ a }: { a: BoardAction }) {
   switch (a.t) {
     case "heading":
       return <h2 className="font-hand text-3xl font-bold text-ink underline decoration-accent decoration-2 underline-offset-4">{a.text}</h2>;

@@ -1,11 +1,13 @@
 "use client";
 
-import { ArrowLeft, ArrowUp, BookOpen, FileText, GraduationCap, Hand, Lightbulb, ListChecks, Mic, Paperclip, Play, Plus, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, BookOpen, Library as LibraryIcon, FileText, GraduationCap, Hand, Lightbulb, ListChecks, Mic, Paperclip, Play, Plus, Volume2, VolumeX, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ATTACH_MAX_BYTES, ATTACH_MAX_FILES, ATTACH_TYPES, readActions, type Attachment, type BoardAction, type LessonMode, type Turn } from "@/lib/board";
 import { APP_NAME } from "@/lib/brand";
 import type { Recap } from "@/lib/recap";
+import { getFiles, keepFile, listFiles, removeFile, viewFile, type StoredFile } from "@/lib/files";
 import { deleteLesson, loadLessons, saveLesson, type SavedLesson } from "@/lib/store";
+import { Library } from "./Library";
 import { Board, isBoardAction } from "./Board";
 import { RecapView } from "./RecapView";
 
@@ -106,8 +108,6 @@ const titleOf = (turns: Turn[]) => {
   return text.length > 70 ? text.slice(0, 67) + "…" : text;
 };
 
-const when = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-
 export function LessonRoom() {
   const [mode, setMode] = useState<LessonMode>("topic");
   const [started, setStarted] = useState(false);
@@ -122,6 +122,8 @@ export function LessonRoom() {
   const [files, setFiles] = useState<(Attachment & { bytes: number })[]>([]);
   const [fileNote, setFileNote] = useState("");
   const [saved, setSaved] = useState<SavedLesson[]>([]);
+  const [kept, setKept] = useState<StoredFile[]>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [recap, setRecap] = useState<Recap | null>(null);
   const [recapSample, setRecapSample] = useState(false);
   const [recapState, setRecapState] = useState<"idle" | "loading" | "error">("idle");
@@ -144,6 +146,7 @@ export function LessonRoom() {
     // Browser-only state, read after the page has loaded.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSaved(loadLessons());
+    void listFiles().then(setKept);
     setCanListen(recognizer() !== null);
     setCanTalk(canSpeak());
     try { if (localStorage.getItem(VOICE_KEY) === "off") setVoice(false); } catch { /* storage blocked: keep sound on */ }
@@ -201,10 +204,18 @@ export function LessonRoom() {
   }, []);
 
   const send = useCallback(async (text: string) => {
-    const attached = files.map(({ name, type, data }) => ({ name, type, data }));
+    const attached = files.map(({ name, type, data, id }) => ({ name, type, data, id: id ?? crypto.randomUUID() }));
     const said = text.trim() || (attached.length ? "Here are my pages. Please take a look." : "");
     if (!said) return;
     if (!lessonId.current) lessonId.current = crypto.randomUUID();
+    if (attached.length) {
+      // Keep every page in the Library. A page brought back from the Library is already there.
+      const lessonTitle = titleOf(turns.current.length ? turns.current : [{ role: "student", text: said }]);
+      const fresh = files.filter((f) => !f.id);
+      void Promise.all(
+        attached.map((f, i) => (files[i]?.id ? null : keepFile({ ...f, bytes: files[i]?.bytes ?? 0, addedAt: Date.now(), lessonId: lessonId.current, lessonTitle }))),
+      ).then(() => (fresh.length ? listFiles().then(setKept) : undefined));
+    }
     setDraft("");
     setFiles([]);
     setFileNote("");
@@ -213,7 +224,7 @@ export function LessonRoom() {
     // The lesson has moved on, so an earlier recap no longer covers it.
     recapRef.current = null; setRecap(null); setRecapState("idle");
     setLines((l) => [...l, { who: "student", text: said, files: attached.map((f) => f.name) }]);
-    const request: Turn[] = [...turns.current, { role: "student", text: said, ...(attached.length ? { files: attached } : {}) }];
+    const request: Turn[] = [...turns.current, { role: "student", text: said, ...(attached.length ? { files: attached, fileIds: attached.map((f) => f.id) } : {}) }];
     // The tutor's turn is recorded as it is revealed, so an interrupted
     // explanation stays in the lesson's history exactly as far as it got.
     const shown: BoardAction[] = [];
@@ -252,7 +263,22 @@ export function LessonRoom() {
     void send(draft);
   };
 
+  const addFromLibrary = (f: StoredFile) => {
+    setLibraryOpen(false);
+    setFileNote("");
+    if (files.some((x) => x.id === f.id)) return;
+    if (files.length >= ATTACH_MAX_FILES) { setFileNote(`You can add up to ${ATTACH_MAX_FILES} files to one message.`); return; }
+    if (files.reduce((n, x) => n + x.bytes, 0) + f.bytes > ATTACH_MAX_BYTES) { setFileNote(`${f.name} would take this message over the 4 MB limit, so send the other pages first.`); return; }
+    setFiles([...files, { id: f.id, name: f.name, type: f.type, data: f.data, bytes: f.bytes }]);
+  };
+
+  const forgetFile = (id: string) => {
+    setKept((k) => k.filter((f) => f.id !== id));
+    void removeFile(id);
+  };
+
   const reset = () => {
+    setLibraryOpen(false);
     interrupt();
     ear.current?.stop();
     turns.current = []; lessonId.current = ""; recapRef.current = null;
@@ -262,7 +288,20 @@ export function LessonRoom() {
 
   const open = (l: SavedLesson) => {
     interrupt();
+    setLibraryOpen(false);
     turns.current = l.turns; lessonId.current = l.id; recapRef.current = l.recap ?? null;
+    // Bring the lesson's pages back from the Library, so the tutor can still see them if you carry on.
+    void (async () => {
+      const ids = l.turns.flatMap((t) => (t.role === "student" ? (t.fileIds ?? []) : []));
+      if (!ids.length) return;
+      const found = await getFiles(ids);
+      if (lessonId.current !== l.id) return;
+      turns.current = turns.current.map((t) => {
+        if (t.role !== "student" || !t.fileIds?.length) return t;
+        const pages = t.fileIds.flatMap((id) => found.filter((f) => f.id === id).map(({ id: fid, name, type, data }) => ({ id: fid, name, type, data })));
+        return pages.length ? { ...t, files: pages } : t;
+      });
+    })();
     const r = render(l.turns);
     setMode(l.mode); setLines(r.lines); setBoard(r.board); setStarted(true); setSample(false);
     setRecap(l.recap ?? null); setRecapSample(false); setRecapState("idle"); setView("room");
@@ -401,6 +440,30 @@ export function LessonRoom() {
     </form>
   );
 
+  const library = (
+    <Library
+      lessons={saved}
+      files={kept}
+      onOpenLesson={open}
+      onDeleteLesson={(id) => setSaved(deleteLesson(id))}
+      onUseFile={addFromLibrary}
+      onViewFile={viewFile}
+      onDeleteFile={forgetFile}
+    />
+  );
+
+  const drawer = libraryOpen && (
+    <div className="fixed inset-0 z-20 flex justify-end" role="dialog" aria-modal="true" aria-label="Library" onKeyDown={(e) => { if (e.key === "Escape") setLibraryOpen(false); }}>
+      <button type="button" aria-label="Close the library" onClick={() => setLibraryOpen(false)} className="absolute inset-0 bg-text/30 backdrop-blur-[2px] animate-[fade-in_200ms_ease-out]" />
+      <div className="relative flex h-full w-full max-w-lg flex-col gap-3 overflow-y-auto bg-bg p-4 shadow-2xl animate-[slide-in_260ms_cubic-bezier(0.2,0.8,0.2,1)]">
+        <div className="flex justify-end">
+          <button type="button" autoFocus onClick={() => setLibraryOpen(false)} className={BTN}><X size={16} aria-hidden /> Close</button>
+        </div>
+        {library}
+      </div>
+    </div>
+  );
+
   const soundButton = canTalk && (
     <button
       type="button"
@@ -444,25 +507,7 @@ export function LessonRoom() {
           {inputBar}
           <p className="mt-3 text-sm text-muted">Paste or drop in a PDF or a picture of your notes, for example pages exported or copied from Notability.</p>
         </div>
-        {saved.length > 0 && (
-          <section aria-labelledby="saved-h">
-            <h2 id="saved-h" className="text-lg font-semibold text-text">Your lessons</h2>
-            <p className="text-sm text-muted">Kept in this browser on this device.</p>
-            <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-surface">
-              {saved.map((l) => (
-                <li key={l.id} className="flex items-center gap-2 p-2">
-                  <button type="button" onClick={() => open(l)} className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-left">
-                    <span className="block truncate font-medium text-text">{l.title}</span>
-                    <span className="block text-sm text-muted">{MODES.find((m) => m.id === l.mode)?.name ?? "Lesson"} · {when(l.updatedAt)}</span>
-                  </button>
-                  <button type="button" onClick={() => setSaved(deleteLesson(l.id))} aria-label={`Delete lesson: ${l.title}`} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted">
-                    <Trash2 size={16} aria-hidden />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+        {library}
       </main>
     );
   }
@@ -480,6 +525,7 @@ export function LessonRoom() {
             <button type="button" onClick={() => void finish()} disabled={!hasLesson} className={BTN}><ListChecks size={16} aria-hidden /> Recap</button>
           </>
         )}
+        <button type="button" onClick={() => setLibraryOpen(true)} aria-haspopup="dialog" className={BTN}><LibraryIcon size={16} aria-hidden /> <span className="hidden sm:inline">Library</span><span className="sr-only sm:hidden">Library</span></button>
         <button type="button" onClick={reset} className={BTN}><Plus size={16} aria-hidden /> <span className="hidden sm:inline">New lesson</span><span className="sr-only sm:hidden">New lesson</span></button>
       </div>
     </header>
@@ -498,6 +544,7 @@ export function LessonRoom() {
           </div>
         )}
         {recap && <RecapView recap={recap} sample={recapSample} />}
+        {drawer}
       </main>
     );
   }
@@ -542,6 +589,7 @@ export function LessonRoom() {
           {inputBar}
         </div>
       </aside>
+      {drawer}
     </main>
   );
 }

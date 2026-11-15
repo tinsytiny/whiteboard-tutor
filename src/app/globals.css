@@ -79,3 +79,9 @@ body {
 /* Maths sits on the board's left margin like the handwriting, not centred. */
 .board-math .katex-display { margin: 0; text-align: left; }
 .board-math .katex-display > .katex { text-align: left; }
+
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes slide-in { from { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-["] { animation: none !important; }
+}

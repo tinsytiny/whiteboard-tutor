@@ -16,14 +16,14 @@ export type BoardAction =
   | { t: "error"; text: string };
 
 /** A page the student brought in: a PDF or picture, for example exported or copied from a notes app. */
-export type Attachment = { name: string; type: string; data: string }; // data is base64
+export type Attachment = { name: string; type: string; data: string; id?: string }; // data is base64; id links it to the Library
 
 export const ATTACH_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"];
 export const ATTACH_MAX_FILES = 4;
 export const ATTACH_MAX_BYTES = 4 * 1024 * 1024; // per message, until file storage is set up
 
 export type Turn =
-  | { role: "student"; text: string; files?: Attachment[]; fileNames?: string[] } // fileNames survive saving, the file data does not
+  | { role: "student"; text: string; files?: Attachment[]; fileNames?: string[]; fileIds?: string[] } // saved lessons keep names and Library ids; the data lives in the Library
   | { role: "tutor"; actions: BoardAction[] };
 
 const KINDS = new Set(["say", "heading", "write", "math", "plot", "table", "note", "ask", "error"]);

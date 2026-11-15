@@ -28,11 +28,16 @@ function write(list: SavedLesson[]): boolean {
   }
 }
 
-/** Attached files are large, so only their names are kept with a saved lesson. */
+/** Attached files are large, so a saved lesson keeps their names and Library ids, not the files. */
 function slim(turns: Turn[]): Turn[] {
   return turns.map((t) =>
     t.role === "student"
-      ? { role: "student", text: t.text, ...(t.files?.length || t.fileNames?.length ? { fileNames: t.fileNames ?? t.files!.map((f) => f.name) } : {}) }
+      ? {
+          role: "student",
+          text: t.text,
+          ...(t.files?.length || t.fileNames?.length ? { fileNames: t.fileNames ?? t.files!.map((f) => f.name) } : {}),
+          ...(t.fileIds?.length || t.files?.some((f) => f.id) ? { fileIds: t.fileIds ?? t.files!.flatMap((f) => (f.id ? [f.id] : [])) } : {}),
+        }
       : t,
   );
 }

@@ -9,9 +9,9 @@ import type { LanguageModel } from "ai";
 
 const usesGoogle = () => Boolean(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
 
-/** Gemini Flash: free tier, fast, reads pictures and PDFs. "latest" keeps it current as Google retires versions. */
+/** Gemini Flash: free tier, fast, reads pictures and PDFs. Google retires old versions for new keys, so update this when it does. */
 export function tutorModel(): LanguageModel {
-  if (usesGoogle()) return google(process.env.TUTOR_MODEL ?? "gemini-flash-latest");
+  if (usesGoogle()) return google(process.env.TUTOR_MODEL ?? "gemini-3.5-flash");
   return process.env.TUTOR_MODEL ?? "anthropic/claude-haiku-5.5";
 }
 

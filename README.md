@@ -13,7 +13,7 @@ npm run dev
 The tutor's AI is free Google Gemini. Get a key at Google AI Studio (no card
 needed) and save it as `GOOGLE_GENERATIVE_AI_API_KEY` in the Vercel project's
 environment variables, or in `.env.local` to run it on a laptop. The default
-model is `gemini-flash-latest`; `TUTOR_MODEL` overrides it.
+model is `gemini-3.5-flash`; `TUTOR_MODEL` overrides it.
 
 Without that key, on Vercel the tutor falls back to Vercel's AI Gateway (which
 needs a card on the Vercel account), and anywhere else it plays a built-in,

@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Design tokens. Components use the role names, never raw colours, so the
+   brand step can change the look by changing these values only. */
+:root {
+  --bg: #f4f1ea;
+  --surface: #ffffff;
+  --board: #fbf9f4;
+  --board-line: #e9e4d8;
+  --border: #d9d3c5;
+  --border-input: #8a8474;
+  --text: #1f1d18;
+  --text-muted: #5c5848;
+  --ink: #1d2a3a;
+  --accent: #2f5d50; /* placeholder until the brand step */
+  --on-accent: #ffffff;
+  --accent-soft: #e3eee9;
+  --warn-soft: #fbf0d6;
+  --warn-text: #5a4206;
+  --danger: #a3271f;
+  --plot-1: #2f5d50;
+  --plot-2: #b4532a;
+  --plot-3: #3b5b92;
+  --plot-4: #7a4a8c;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-board: var(--board);
+  --color-board-line: var(--board-line);
+  --color-border: var(--border);
+  --color-border-input: var(--border-input);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-ink: var(--ink);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-text: var(--warn-text);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-ui);
+  --font-hand: var(--font-hand);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.board-paper {
+  background-color: var(--board);
+  background-image: linear-gradient(var(--board-line) 1px, transparent 1px);
+  background-size: 100% 2.5rem;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.35s ease-out both; }
+
+@keyframes draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+.draw { stroke-dasharray: 1; animation: draw 1.4s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .draw { animation: none; }
+}
+
+/* Maths sits on the board's left margin like the handwriting, not centred. */
+.board-math .katex-display { margin: 0; text-align: left; }
+.board-math .katex-display > .katex { text-align: left; }

@@ -10,6 +10,7 @@ const hand = Kalam({ variable: "--font-hand", subsets: ["latin"], weight: ["400"
 export const metadata: Metadata = {
   title: APP_NAME,
   description: "A tutor that talks it through and writes every step on the board.",
+  robots: { index: false, follow: false, nocache: true },
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };

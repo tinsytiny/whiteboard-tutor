@@ -1,34 +1,29 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { streamText, type ModelMessage } from "ai";
 import { ATTACH_MAX_BYTES, ATTACH_MAX_FILES, ATTACH_TYPES, type Attachment, type BoardAction, type LessonMode, type Turn } from "@/lib/board";
 import { demoLesson } from "@/lib/demo";
 import { systemPrompt } from "@/lib/prompt";
+import { problemText, TUTOR_MODEL, tutorIsLive } from "@/lib/tutor";
 
 export const maxDuration = 300;
 
-const MODEL = process.env.TUTOR_MODEL ?? "claude-opus-5-5";
 const MODES: LessonMode[] = ["topic", "homework", "exam"];
 const MAX_TURNS = 60;
 const MAX_CHARS = 8000;
 
 const line = (a: BoardAction) => JSON.stringify(a) + "\n";
 
-type ImageType = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-
-function studentContent(text: string, files: Attachment[] = []): Anthropic.Beta.BetaContentBlockParam[] {
-  // Files go before the words, so the tutor reads the page and then the question.
-  const blocks: Anthropic.Beta.BetaContentBlockParam[] = files.map((f) =>
-    f.type === "application/pdf"
-      ? { type: "document" as const, title: f.name, source: { type: "base64" as const, media_type: "application/pdf" as const, data: f.data } }
-      : { type: "image" as const, source: { type: "base64" as const, media_type: f.type as ImageType, data: f.data } },
-  );
-  return [...blocks, { type: "text", text }];
-}
-
-function toMessages(turns: Turn[]): Anthropic.Beta.BetaMessageParam[] {
-  return turns.map((t) =>
+function toMessages(turns: Turn[]): ModelMessage[] {
+  return turns.map((t): ModelMessage =>
     t.role === "student"
-      ? { role: "user" as const, content: studentContent(t.text, t.files) }
-      : { role: "assistant" as const, content: t.actions.map((a) => JSON.stringify(a)).join("\n") || "{}" },
+      ? {
+          role: "user",
+          // Files go before the words, so the tutor reads the page and then the question.
+          content: [
+            ...(t.files ?? []).map((f: Attachment) => ({ type: "file" as const, mediaType: f.type, data: f.data, filename: f.name })),
+            { type: "text" as const, text: t.text },
+          ],
+        }
+      : { role: "assistant", content: t.actions.map((a) => JSON.stringify(a)).join("\n") || "{}" },
   );
 }
 
@@ -71,56 +66,40 @@ export async function POST(req: Request) {
 
   const enc = new TextEncoder();
   const headers = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" };
-  const live = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-
-  if (!live) {
+  if (!tutorIsLive()) {
     const students = turns.filter((t) => t.role === "student").map((t) => (t as { text: string }).text);
     const actions = demoLesson(mode, students);
     return new Response(enc.encode(actions.map(line).join("")), { headers: { ...headers, "x-tutor": "demo" } });
   }
 
-  const client = new Anthropic();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const fail = (text: string) => controller.enqueue(enc.encode(line({ t: "error", text })));
+      let failed = false;
       try {
-        const run = client.beta.messages.stream(
-          {
-            model: MODEL,
-            // If the model declines a request on policy grounds, the API retries
-            // it on a fallback model inside the same call.
-            betas: ["server-side-fallback-2026-07-01"],
-            fallbacks: "default",
-            max_tokens: 16000,
-            thinking: { type: "adaptive" },
-            output_config: { effort: "medium" },
-            system: [{ type: "text", text: systemPrompt(mode), cache_control: { type: "ephemeral" } }],
-            messages: toMessages(turns),
+        const run = streamText({
+          model: TUTOR_MODEL,
+          system: systemPrompt(mode),
+          messages: toMessages(turns),
+          maxOutputTokens: 8000,
+          abortSignal: req.signal,
+          onError: ({ error }) => {
+            if (req.signal.aborted || failed) return;
+            failed = true;
+            console.error("tutor error", error);
+            fail(problemText(error));
           },
-          { signal: req.signal },
-        );
-        for await (const event of run) {
-          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-            controller.enqueue(enc.encode(event.delta.text));
-          }
-        }
-        const final = await run.finalMessage();
+        });
+        for await (const text of run.textStream) controller.enqueue(enc.encode(text));
         controller.enqueue(enc.encode("\n"));
-        if (final.stop_reason === "refusal") fail("The tutor can't help with that one. Try asking it another way.");
-        else if (final.stop_reason === "max_tokens") fail("That explanation ran long and was cut off. Ask me to carry on.");
+        if (!failed && !req.signal.aborted && (await run.finishReason) === "length") {
+          fail("That explanation ran long and was cut off. Ask me to carry on.");
+        }
       } catch (error) {
-        if (req.signal.aborted) {
-          // The student interrupted. Nothing to report.
-        } else if (error instanceof Anthropic.RateLimitError) {
-          fail("The tutor is busy right now. Give it a moment and try again.");
-        } else if (error instanceof Anthropic.AuthenticationError) {
-          fail("The tutor's key was rejected. Check the ANTHROPIC_API_KEY setting.");
-        } else if (error instanceof Anthropic.APIError) {
-          console.error("tutor api error", error.status, error.message);
-          fail("The tutor hit a problem. Try that again.");
-        } else {
+        // An abort means the student interrupted, which is not a problem to report.
+        if (!req.signal.aborted && !failed) {
           console.error("tutor error", error);
-          fail("The tutor hit a problem. Try that again.");
+          fail(problemText(error));
         }
       } finally {
         controller.close();

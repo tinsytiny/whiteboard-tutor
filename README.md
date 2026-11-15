@@ -10,9 +10,11 @@ npm install
 npm run dev
 ```
 
-Without a key the app plays a built-in, clearly labelled sample lesson. To
-connect the live tutor, set `ANTHROPIC_API_KEY` in `.env.local`. `TUTOR_MODEL`
-optionally overrides the model.
+On a laptop the app plays a built-in, clearly labelled sample lesson. On
+Vercel the tutor is live: it uses Vercel's AI Gateway and signs in by itself,
+so there is no API key to create. `TUTOR_MODEL` optionally overrides the model
+(default `anthropic/claude-haiku-5.5`). To run the live tutor off Vercel, set
+`AI_GATEWAY_API_KEY` in `.env.local`.
 
 ## How it works
 

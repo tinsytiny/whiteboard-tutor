@@ -1,12 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { generateText, Output } from "ai";
 import { z } from "zod";
 import type { Turn } from "@/lib/board";
 import { lessonText, SAMPLE_RECAP, type Recap } from "@/lib/recap";
+import { problemText, TUTOR_MODEL, tutorIsLive } from "@/lib/tutor";
 
 export const maxDuration = 120;
-
-const MODEL = process.env.TUTOR_MODEL ?? "claude-opus-5-5";
 
 const RecapSchema = z.object({
   notes: z.array(z.string()),
@@ -41,7 +39,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Bad request" }, { status: 400 });
   }
 
-  if (!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN)) {
+  if (!tutorIsLive()) {
     return Response.json({ recap: SAMPLE_RECAP, sample: true });
   }
 
@@ -53,21 +51,18 @@ export async function POST(req: Request) {
   }
 
   try {
-    const client = new Anthropic();
-    const response = await client.messages.parse({
-      model: MODEL,
-      max_tokens: 16000,
-      output_config: { effort: "medium", format: zodOutputFormat(RecapSchema) },
+    const { output } = await generateText({
+      model: TUTOR_MODEL,
       system: SYSTEM,
-      messages: [{ role: "user", content: `Here is the lesson.\n\n${text}` }],
+      prompt: `Here is the lesson.\n\n${text}`,
+      output: Output.object({ schema: RecapSchema }),
+      maxOutputTokens: 4000,
     });
-    const recap = response.parsed_output ? clean(response.parsed_output) : null;
+    const recap = output ? clean(output) : null;
     if (!recap) return Response.json({ error: "The recap could not be written. Try again." }, { status: 502 });
     return Response.json({ recap, sample: false });
   } catch (error) {
-    if (error instanceof Anthropic.RateLimitError) return Response.json({ error: "The tutor is busy right now. Try again in a moment." }, { status: 429 });
-    if (error instanceof Anthropic.APIError) console.error("recap api error", error.status, error.message);
-    else console.error("recap error", error);
-    return Response.json({ error: "The recap could not be written. Try again." }, { status: 502 });
+    console.error("recap error", error);
+    return Response.json({ error: problemText(error) }, { status: 502 });
   }
 }

@@ -53,6 +53,9 @@ function validTurns(v: unknown): v is Turn[] {
   );
 }
 
+/** How long the AI may go silent before the lesson gives up. */
+const STALL_MS = 30_000;
+
 export async function POST(req: Request) {
   let body: { mode?: unknown; turns?: unknown };
   try {
@@ -76,32 +79,47 @@ export async function POST(req: Request) {
     async start(controller) {
       const fail = (text: string) => controller.enqueue(enc.encode(line({ t: "error", text })));
       let failed = false;
+      // If the AI sends nothing for a while, stop waiting and say so, rather
+      // than leaving the board stuck on "explaining".
+      const stall = new AbortController();
+      let timer = setTimeout(() => stall.abort(), STALL_MS);
+      const signal = AbortSignal.any([req.signal, stall.signal]);
       try {
         const run = streamText({
           model: tutorModel(),
           system: systemPrompt(mode),
           messages: toMessages(turns),
           maxOutputTokens: 8000,
-          abortSignal: req.signal,
+          abortSignal: signal,
           onError: ({ error }) => {
-            if (req.signal.aborted || failed) return;
+            if (signal.aborted || failed) return;
             failed = true;
             console.error("tutor error", error);
             fail(problemText(error));
           },
         });
-        for await (const text of run.textStream) controller.enqueue(enc.encode(text));
+        for await (const text of run.textStream) {
+          clearTimeout(timer);
+          timer = setTimeout(() => stall.abort(), STALL_MS);
+          controller.enqueue(enc.encode(text));
+        }
         controller.enqueue(enc.encode("\n"));
-        if (!failed && !req.signal.aborted && (await run.finishReason) === "length") {
+        if (!failed && !signal.aborted && (await run.finishReason) === "length") {
           fail("That explanation ran long and was cut off. Ask me to carry on.");
         }
       } catch (error) {
         // An abort means the student interrupted, which is not a problem to report.
-        if (!req.signal.aborted && !failed) {
+        if (!signal.aborted && !failed) {
           console.error("tutor error", error);
           fail(problemText(error));
         }
       } finally {
+        clearTimeout(timer);
+        // A stall can end the stream quietly or by throwing; report it either way.
+        if (stall.signal.aborted && !req.signal.aborted && !failed) {
+          console.error("tutor stalled", STALL_MS, "ms with no reply");
+          fail("The tutor's AI didn't answer in time. Try that again.");
+        }
         controller.close();
       }
     },

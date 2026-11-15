@@ -2,7 +2,7 @@ import { streamText, type ModelMessage } from "ai";
 import { ATTACH_MAX_BYTES, ATTACH_MAX_FILES, ATTACH_TYPES, type Attachment, type BoardAction, type LessonMode, type Turn } from "@/lib/board";
 import { demoLesson } from "@/lib/demo";
 import { systemPrompt } from "@/lib/prompt";
-import { problemText, TUTOR_MODEL, tutorIsLive } from "@/lib/tutor";
+import { problemText, tutorIsLive, tutorModel } from "@/lib/tutor";
 
 export const maxDuration = 300;
 
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
       let failed = false;
       try {
         const run = streamText({
-          model: TUTOR_MODEL,
+          model: tutorModel(),
           system: systemPrompt(mode),
           messages: toMessages(turns),
           maxOutputTokens: 8000,

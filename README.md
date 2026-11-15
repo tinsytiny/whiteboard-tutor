@@ -10,11 +10,14 @@ npm install
 npm run dev
 ```
 
-On a laptop the app plays a built-in, clearly labelled sample lesson. On
-Vercel the tutor is live: it uses Vercel's AI Gateway and signs in by itself,
-so there is no API key to create. `TUTOR_MODEL` optionally overrides the model
-(default `anthropic/claude-haiku-5.5`). To run the live tutor off Vercel, set
-`AI_GATEWAY_API_KEY` in `.env.local`.
+The tutor's AI is free Google Gemini. Get a key at Google AI Studio (no card
+needed) and save it as `GOOGLE_GENERATIVE_AI_API_KEY` in the Vercel project's
+environment variables, or in `.env.local` to run it on a laptop. The default
+model is `gemini-flash-latest`; `TUTOR_MODEL` overrides it.
+
+Without that key, on Vercel the tutor falls back to Vercel's AI Gateway (which
+needs a card on the Vercel account), and anywhere else it plays a built-in,
+clearly labelled sample lesson.
 
 ## How it works
 

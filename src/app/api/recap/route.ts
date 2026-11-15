@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 import type { Turn } from "@/lib/board";
 import { lessonText, SAMPLE_RECAP, type Recap } from "@/lib/recap";
-import { problemText, TUTOR_MODEL, tutorIsLive } from "@/lib/tutor";
+import { problemText, tutorIsLive, tutorModel } from "@/lib/tutor";
 
 export const maxDuration = 120;
 
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   try {
     const { output } = await generateText({
-      model: TUTOR_MODEL,
+      model: tutorModel(),
       system: SYSTEM,
       prompt: `Here is the lesson.\n\n${text}`,
       output: Output.object({ schema: RecapSchema }),

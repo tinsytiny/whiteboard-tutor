@@ -1,4 +1,9 @@
-// The tutor's voice: the browser's own speech, which is free and works offline.
+// The tutor's voice. First choice is a natural, human-sounding voice from
+// Google's free Gemini speech model (through /api/voice). If that isn't
+// available, for example when the free daily allowance is used up, the
+// browser's own built-in voice takes over, so the tutor never goes quiet.
+
+import { startAudio } from "./sounds";
 
 export const VOICE_KEY = "tutor.voice.v1";
 export const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window;
@@ -17,6 +22,7 @@ function bestVoice(): SpeechSynthesisVoice | undefined {
  * that follows, even though the tutor's words arrive a moment later.
  */
 export function unlockSpeech() {
+  startAudio();
   if (!canSpeak()) return;
   const u = new SpeechSynthesisUtterance(" ");
   u.volume = 0;
@@ -24,7 +30,65 @@ export function unlockSpeech() {
   window.speechSynthesis.speak(u);
 }
 
-export function speak(text: string, signal?: AbortSignal): Promise<void> {
+let natural = true; // switched off for this visit if the voice service says no
+const clips = new Map<string, Promise<AudioBuffer | null>>();
+
+function clip(text: string): Promise<AudioBuffer | null> {
+  const key = text.trim();
+  let found = clips.get(key);
+  if (!found) {
+    found = (async () => {
+      if (!natural) return null;
+      try {
+        const res = await fetch(`/api/voice?text=${encodeURIComponent(key)}`);
+        if (!res.ok) {
+          if (res.status === 429 || res.status === 503) natural = false;
+          return null;
+        }
+        const ctx = startAudio();
+        if (!ctx) return null;
+        return await ctx.decodeAudioData(await res.arrayBuffer());
+      } catch {
+        return null;
+      }
+    })();
+    clips.set(key, found);
+    if (clips.size > 200) clips.delete(clips.keys().next().value!);
+  }
+  return found;
+}
+
+/** Start fetching a line's voice early, so it is ready when its turn comes. */
+export function prefetchVoice(text: string) {
+  if (natural && typeof window !== "undefined") void clip(text);
+}
+
+function playClip(buffer: AudioBuffer, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const ctx = startAudio();
+    if (!ctx) return resolve();
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    const done = () => { signal?.removeEventListener("abort", stop); resolve(); };
+    const stop = () => { try { src.stop(); } catch { /* already stopped */ } done(); };
+    src.onended = done;
+    signal?.addEventListener("abort", stop);
+    src.start();
+  });
+}
+
+/** Says a line, in the natural voice when it can, otherwise the browser's voice. */
+export async function speak(text: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
+  const buffer = natural ? await Promise.race([clip(text), new Promise<null>((r) => setTimeout(() => r(null), 12_000))]) : null;
+  if (signal?.aborted) return;
+  // A clip can only be heard once audio was started by a tap (iPad Safari).
+  if (buffer && startAudio()?.state === "running") return playClip(buffer, signal);
+  return browserSpeak(text, signal);
+}
+
+function browserSpeak(text: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (!canSpeak() || signal?.aborted) return resolve();
     const u = new SpeechSynthesisUtterance(text);

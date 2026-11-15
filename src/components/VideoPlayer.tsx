@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Music, Pause, Play, RotateCcw, Sparkles, Vol
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardAction, Turn } from "@/lib/board";
 import { chalk, chime, finale, music, startAudio } from "@/lib/sounds";
-import { canSpeak, speak, unlockSpeech } from "@/lib/speech";
+import { canSpeak, prefetchVoice, speak, unlockSpeech } from "@/lib/speech";
 import { isBoardAction, Item } from "./Board";
 
 // A lesson played back as an explainer video: each question becomes a title
@@ -90,6 +90,8 @@ export function VideoPlayer({ turns, title, onClose }: { turns: Turn[]; title: s
           setAt(i);
           const s = steps[i];
           const { voice: talk, effects: fx } = opts.current;
+          // Fetch the next two lines' voices while this one plays.
+          if (talk) steps.slice(i + 1, i + 6).filter((n) => n.kind === "say").slice(0, 2).forEach((n) => prefetchVoice((n as { text: string }).text));
           if (s.kind === "title") {
             if (fx) chime(true);
             await wait(2600, ctrl.signal);

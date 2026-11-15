@@ -9,7 +9,7 @@ import { getFiles, keepFile, listFiles, removeFile, viewFile, type StoredFile } 
 import { deleteLesson, loadLessons, saveLesson, type SavedLesson } from "@/lib/store";
 import { Library } from "./Library";
 import { VideoPlayer } from "./VideoPlayer";
-import { canSpeak, speak, unlockSpeech, VOICE_KEY } from "@/lib/speech";
+import { canSpeak, prefetchVoice, speak, unlockSpeech, VOICE_KEY } from "@/lib/speech";
 import { Board, isBoardAction } from "./Board";
 import { RecapView } from "./RecapView";
 
@@ -204,10 +204,33 @@ export function LessonRoom() {
       });
       if (!res.ok || !res.body) throw new Error(`lesson request failed: ${res.status}`);
       setSample(res.headers.get("x-tutor") === "demo");
-      for await (const a of readActions(res.body)) {
-        if (a.t !== "error") shown.push(a);
-        await show(a, ctrl.signal);
+      // Read the tutor's reply as it streams in, while showing it at the pace of
+      // the voice, so each line's voice can be fetched before its turn comes.
+      const queue: BoardAction[] = [];
+      let ended = false;
+      const arrived = { wake: null as (() => void) | null };
+      const reading = (async () => {
+        try {
+          for await (const a of readActions(res.body!)) {
+            queue.push(a);
+            if (voiceRef.current && (a.t === "say" || a.t === "ask")) prefetchVoice(a.text);
+            arrived.wake?.();
+          }
+        } finally {
+          ended = true;
+          arrived.wake?.();
+        }
+      })();
+      while (true) {
+        const a = queue.shift();
+        if (a) {
+          if (a.t !== "error") shown.push(a);
+          await show(a, ctrl.signal);
+        } else if (ended) break;
+        else await new Promise<void>((r) => { arrived.wake = r; });
+        arrived.wake = null;
       }
+      await reading;
     } catch (e) {
       if (!(e instanceof DOMException && e.name === "AbortError")) {
         setLines((l) => [...l, { who: "problem", text: "Something went wrong reaching the tutor. Try sending that again." }]);
@@ -282,7 +305,10 @@ export function LessonRoom() {
           setLines((l) => [...l, { who: "student", text: t.text, files: t.fileNames ?? t.files?.map((f) => f.name) }]);
           await wait(600, ctrl.signal);
           if (ctrl.signal.aborted) throw new DOMException("interrupted", "AbortError");
-        } else for (const a of t.actions) await show(a, ctrl.signal);
+        } else {
+          t.actions.forEach((a) => { if (voiceRef.current && (a.t === "say" || a.t === "ask")) prefetchVoice(a.text); });
+          for (const a of t.actions) await show(a, ctrl.signal);
+        }
       }
     } catch {
       // Stopped early.

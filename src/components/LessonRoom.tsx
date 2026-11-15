@@ -36,13 +36,43 @@ function toBase64(file: File): Promise<string> {
   });
 }
 
-function speak(text: string): Promise<void> {
+const VOICE_KEY = "tutor.voice.v1";
+const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window;
+
+/** The clearest English voice the device has: Apple's enhanced voices, then Google's, then any English. */
+function bestVoice(): SpeechSynthesisVoice | undefined {
+  const voices = window.speechSynthesis.getVoices().filter((v) => /^en/i.test(v.lang));
+  const rank = (v: SpeechSynthesisVoice) =>
+    (/premium|enhanced|natural|neural/i.test(v.name) ? 4 : 0) + (/google|samantha|daniel|karen|serena|ava|zoe/i.test(v.name) ? 2 : 0) + (v.localService ? 1 : 0);
+  return voices.sort((a, b) => rank(b) - rank(a))[0];
+}
+
+/**
+ * iPad and iPhone Safari only allow speech that starts from a tap. Calling this
+ * inside a tap (send, the sound button, replay) unlocks speech for the lesson
+ * that follows, even though the tutor's words arrive a moment later.
+ */
+function unlockSpeech() {
+  if (!canSpeak()) return;
+  const u = new SpeechSynthesisUtterance(" ");
+  u.volume = 0;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(u);
+}
+
+function speak(text: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return resolve();
+    if (!canSpeak() || signal?.aborted) return resolve();
     const u = new SpeechSynthesisUtterance(text);
+    const voice = bestVoice();
+    if (voice) u.voice = voice;
     u.rate = 1.02;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
+    // Some browsers never fire "end", so don't let the board wait forever.
+    const guard = setTimeout(done, 2500 + text.length * 110);
+    function done() { clearTimeout(guard); signal?.removeEventListener("abort", done); resolve(); }
+    u.onend = done;
+    u.onerror = done;
+    signal?.addEventListener("abort", done);
     window.speechSynthesis.speak(u);
   });
 }
@@ -86,7 +116,8 @@ export function LessonRoom() {
   const [board, setBoard] = useState<BoardAction[]>([]);
   const [busy, setBusy] = useState(false);
   const [replaying, setReplaying] = useState(false);
-  const [voice, setVoice] = useState(false);
+  const [voice, setVoice] = useState(true);
+  const [canTalk, setCanTalk] = useState(false);
   const [sample, setSample] = useState(false);
   const [files, setFiles] = useState<(Attachment & { bytes: number })[]>([]);
   const [fileNote, setFileNote] = useState("");
@@ -114,6 +145,9 @@ export function LessonRoom() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSaved(loadLessons());
     setCanListen(recognizer() !== null);
+    setCanTalk(canSpeak());
+    try { if (localStorage.getItem(VOICE_KEY) === "off") setVoice(false); } catch { /* storage blocked: keep sound on */ }
+    if (canSpeak()) window.speechSynthesis.getVoices(); // starts loading the voice list
     return () => { abort.current?.abort(); window.speechSynthesis?.cancel(); ear.current?.stop(); };
   }, []);
 
@@ -141,7 +175,7 @@ export function LessonRoom() {
     if (a.t === "say" || a.t === "ask") {
       setLines((l) => [...l, { who: "tutor", text: a.text, question: a.t === "ask" }]);
       // Pace the lesson to the speed of speech, so the board keeps step with the voice.
-      if (voiceRef.current) await speak(a.text);
+      if (voiceRef.current) await speak(a.text, signal);
       else await wait(Math.min(350 + a.text.length * 28, 4200), signal);
     } else if (a.t === "error") {
       setLines((l) => [...l, { who: "problem", text: a.text }]);
@@ -151,6 +185,15 @@ export function LessonRoom() {
     }
     if (signal.aborted) throw new DOMException("interrupted", "AbortError");
   }, []);
+
+  const toggleVoice = () => {
+    const next = !voice;
+    if (next) unlockSpeech(); else window.speechSynthesis?.cancel();
+    setVoice(next);
+    try { localStorage.setItem(VOICE_KEY, next ? "on" : "off"); } catch { /* not remembered, that's fine */ }
+  };
+
+  const hear = (text: string) => { window.speechSynthesis?.cancel(); void speak(text); };
 
   const interrupt = useCallback(() => {
     abort.current?.abort();
@@ -205,6 +248,7 @@ export function LessonRoom() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) interrupt();
+    if (voice) unlockSpeech();
     void send(draft);
   };
 
@@ -227,6 +271,7 @@ export function LessonRoom() {
   /** Step back through the lesson as it was taught. Stopping shows the whole lesson again. */
   const replay = async () => {
     interrupt();
+    if (voice) unlockSpeech();
     const ctrl = new AbortController();
     abort.current = ctrl;
     setLines([]); setBoard([]); setBusy(true); setReplaying(true); setView("room");
@@ -271,6 +316,7 @@ export function LessonRoom() {
   };
 
   const listen = () => {
+    if (voice) unlockSpeech();
     if (listening) { ear.current?.stop(); return; }
     const r = recognizer();
     if (!r) return;
@@ -355,11 +401,26 @@ export function LessonRoom() {
     </form>
   );
 
+  const soundButton = canTalk && (
+    <button
+      type="button"
+      onClick={toggleVoice}
+      aria-pressed={voice}
+      className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition-colors active:scale-[0.97] ${voice ? "border-accent bg-accent text-on-accent" : "border-border-input bg-surface text-text"}`}
+    >
+      {voice ? <Volume2 size={18} aria-hidden /> : <VolumeX size={18} aria-hidden />}
+      {voice ? "Sound on" : "Sound off"}
+    </button>
+  );
+
   if (!started) {
     return (
       <main className="mx-auto flex min-h-full max-w-2xl flex-col justify-center gap-8 px-4 py-10">
         <header>
-          <p className="text-sm font-semibold tracking-wide text-accent">{APP_NAME}</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold tracking-wide text-accent">{APP_NAME}</p>
+            {soundButton}
+          </div>
           <h1 className="mt-2 text-3xl font-semibold text-text sm:text-4xl">What shall we work on?</h1>
           <p className="mt-2 text-muted">Your tutor talks it through and writes every step on the board. Stop it any time and ask why.</p>
         </header>
@@ -414,9 +475,7 @@ export function LessonRoom() {
           <button type="button" onClick={() => setView("room")} className={BTN}><ArrowLeft size={16} aria-hidden /> Back to the board</button>
         ) : (
           <>
-            <button type="button" onClick={() => { if (voice) window.speechSynthesis?.cancel(); setVoice(!voice); }} aria-pressed={voice} className={BTN}>
-              {voice ? <Volume2 size={16} aria-hidden /> : <VolumeX size={16} aria-hidden />} <span className="hidden sm:inline">Voice {voice ? "on" : "off"}</span><span className="sr-only sm:hidden">Voice {voice ? "on" : "off"}</span>
-            </button>
+            {soundButton}
             <button type="button" onClick={() => void replay()} disabled={!hasLesson || replaying} className={BTN}><Play size={16} aria-hidden /> <span className="hidden sm:inline">Replay</span><span className="sr-only sm:hidden">Replay</span></button>
             <button type="button" onClick={() => void finish()} disabled={!hasLesson} className={BTN}><ListChecks size={16} aria-hidden /> Recap</button>
           </>
@@ -461,7 +520,14 @@ export function LessonRoom() {
             ) : l.who === "problem" ? (
               <p key={i} role="alert" className="rounded-lg border border-danger/40 px-3 py-2 text-danger">{l.text}</p>
             ) : (
-              <p key={i} className={`mr-4 text-text ${l.question ? "font-semibold" : ""}`}><span className="sr-only">Tutor: </span>{l.text}</p>
+              <div key={i} className="group mr-4 flex items-start gap-1">
+                <p className={`flex-1 text-text ${l.question ? "font-semibold" : ""}`}><span className="sr-only">Tutor: </span>{l.text}</p>
+                {canTalk && (
+                  <button type="button" onClick={() => hear(l.text)} aria-label="Hear this again" className="-mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:text-accent">
+                    <Volume2 size={15} aria-hidden />
+                  </button>
+                )}
+              </div>
             ),
           )}
           {busy && <p className="text-sm text-muted">{replaying ? "Replaying the lesson…" : "Tutor is explaining…"}</p>}

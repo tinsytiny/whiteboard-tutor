@@ -9,6 +9,7 @@ import { getFiles, keepFile, listFiles, removeFile, viewFile, type StoredFile } 
 import { deleteLesson, loadLessons, saveLesson, type SavedLesson } from "@/lib/store";
 import { Library } from "./Library";
 import { VideoPlayer } from "./VideoPlayer";
+import { VoiceSettings } from "./VoiceSettings";
 import { canSpeak, prefetchVoice, speak, unlockSpeech, VOICE_KEY } from "@/lib/speech";
 import { Board, isBoardAction } from "./Board";
 import { RecapView } from "./RecapView";
@@ -462,6 +463,7 @@ export function LessonRoom() {
   );
 
   const soundButton = canTalk && (
+    <div className="flex items-center gap-2">
     <button
       type="button"
       onClick={toggleVoice}
@@ -471,6 +473,8 @@ export function LessonRoom() {
       {voice ? <Volume2 size={18} aria-hidden /> : <VolumeX size={18} aria-hidden />}
       {voice ? "Sound on" : "Sound off"}
     </button>
+    <VoiceSettings />
+    </div>
   );
 
   if (!started) {

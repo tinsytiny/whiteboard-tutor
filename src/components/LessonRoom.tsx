@@ -11,7 +11,7 @@ import { Library } from "./Library";
 import { VideoPlayer } from "./VideoPlayer";
 import { VoiceSettings } from "./VoiceSettings";
 import { canSpeak, prefetchVoice, speak, unlockSpeech, VOICE_KEY } from "@/lib/speech";
-import { Board, isBoardAction } from "./Board";
+import { Board, focusFor, isBoardAction } from "./Board";
 import { RecapView } from "./RecapView";
 
 type Line = { who: "student" | "tutor" | "problem"; text: string; question?: boolean; files?: string[] };
@@ -76,6 +76,8 @@ export function LessonRoom() {
   const [draft, setDraft] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [board, setBoard] = useState<BoardAction[]>([]);
+  const [focus, setFocus] = useState(-1); // the board item the tutor is talking about
+  const boardNow = useRef<BoardAction[]>([]);
   const [busy, setBusy] = useState(false);
   const [replaying, setReplaying] = useState(false);
   const [voice, setVoice] = useState(true);
@@ -140,14 +142,17 @@ export function LessonRoom() {
   const show = useCallback(async (a: BoardAction, signal: AbortSignal) => {
     if (a.t === "say" || a.t === "ask") {
       setLines((l) => [...l, { who: "tutor", text: a.text, question: a.t === "ask" }]);
+      setFocus(a.t === "say" ? focusFor(boardNow.current, a.mark) : -1);
       // Pace the lesson to the speed of speech, so the board keeps step with the voice.
       if (voiceRef.current) await speak(a.text, signal);
       else await wait(Math.min(350 + a.text.length * 28, 4200), signal);
     } else if (a.t === "error") {
       setLines((l) => [...l, { who: "problem", text: a.text }]);
     } else if (isBoardAction(a)) {
-      setBoard((b) => [...b, a]);
-      await wait(a.t === "plot" ? 1500 : 700, signal);
+      boardNow.current = [...boardNow.current, a];
+      setBoard(boardNow.current);
+      setFocus(boardNow.current.length - 1);
+      await wait(a.t === "plot" || a.t === "draw" ? 1800 : a.t === "flow" || a.t === "bars" ? 1300 : 700, signal);
     }
     if (signal.aborted) throw new DOMException("interrupted", "AbortError");
   }, []);
@@ -268,7 +273,7 @@ export function LessonRoom() {
     interrupt();
     ear.current?.stop();
     turns.current = []; lessonId.current = ""; recapRef.current = null;
-    setLines([]); setBoard([]); setStarted(false); setDraft(""); setSample(false); setFiles([]); setFileNote("");
+    setLines([]); setBoard([]); boardNow.current = []; setFocus(-1); setStarted(false); setDraft(""); setSample(false); setFiles([]); setFileNote("");
     setRecap(null); setRecapState("idle"); setView("room"); setReplaying(false);
   };
 
@@ -289,7 +294,7 @@ export function LessonRoom() {
       });
     })();
     const r = render(l.turns);
-    setMode(l.mode); setLines(r.lines); setBoard(r.board); setStarted(true); setSample(false);
+    setMode(l.mode); setLines(r.lines); setBoard(r.board); boardNow.current = r.board; setStarted(true); setSample(false);
     setRecap(l.recap ?? null); setRecapSample(false); setRecapState("idle"); setView("room");
   };
 
@@ -299,7 +304,7 @@ export function LessonRoom() {
     if (voice) unlockSpeech();
     const ctrl = new AbortController();
     abort.current = ctrl;
-    setLines([]); setBoard([]); setBusy(true); setReplaying(true); setView("room");
+    setLines([]); setBoard([]); boardNow.current = []; setBusy(true); setReplaying(true); setView("room");
     try {
       for (const t of turns.current) {
         if (t.role === "student") {
@@ -316,7 +321,7 @@ export function LessonRoom() {
     } finally {
       if (abort.current === ctrl) {
         const r = render(turns.current);
-        setLines(r.lines); setBoard(r.board);
+        setLines(r.lines); setBoard(r.board); boardNow.current = r.board;
         abort.current = null; setBusy(false); setReplaying(false);
       }
     }
@@ -556,7 +561,7 @@ export function LessonRoom() {
     <main className="mx-auto grid h-dvh max-w-[1400px] grid-rows-[auto_minmax(0,1fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-[auto_minmax(0,1fr)]">
       {header}
 
-      <Board actions={board} empty="The board is clear. Your tutor is about to start." />
+      <Board actions={board} focus={busy ? focus : -1} empty="The board is clear. Your tutor is about to start." />
 
       <aside aria-label="Conversation" className="flex min-h-0 flex-col rounded-xl border border-border bg-surface">
         {sample && <p className="border-b border-border bg-warn-soft px-3 py-2 text-sm text-warn-text">Sample lesson. The live tutor is not connected yet, so this one is scripted.</p>}
@@ -570,7 +575,7 @@ export function LessonRoom() {
             ) : l.who === "problem" ? (
               <p key={i} role="alert" className="rounded-lg border border-danger/40 px-3 py-2 text-danger">{l.text}</p>
             ) : (
-              <div key={i} className={`group mr-4 flex items-start gap-1 rounded-lg transition-colors duration-500 ${busy && i === lines.length - 1 ? "speaking" : ""}`}>
+              <div key={i} className={`group mr-4 flex items-start gap-1 rounded-lg ${busy && i === lines.length - 1 ? "speaking" : ""}`}>
                 <p className={`flex-1 text-text ${l.question ? "font-semibold" : ""}`}><span className="sr-only">Tutor: </span>{l.text}</p>
                 {canTalk && (
                   <button type="button" onClick={() => hear(l.text)} aria-label="Hear this again" className="-mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:text-accent">

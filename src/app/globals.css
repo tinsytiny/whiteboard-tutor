@@ -79,20 +79,21 @@ body {
 }
 .handwrite { animation: handwrite 0.7s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
 
-/* The newest thing on the board gets a short marker in the margin. */
-.latest { position: relative; }
-.latest::before {
-  content: "";
-  position: absolute;
-  left: -0.9rem;
-  top: 0.35rem;
-  bottom: 0.35rem;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
-  animation: marker 2.4s ease-out both;
+/* The board item the tutor is talking about, picked out with a highlighter. */
+.board-item { position: relative; border-radius: 0.5rem; outline: 3px solid transparent; outline-offset: 4px; transition: background-color 0.4s ease, outline-color 0.4s ease; }
+.board-item.focus {
+  background: linear-gradient(transparent 8%, rgba(250, 214, 92, 0.38) 8%, rgba(250, 214, 92, 0.38) 92%, transparent 92%);
+  outline: 3px solid rgba(214, 160, 20, 0.55);
+  outline-offset: 4px;
 }
-@keyframes marker { 0% { opacity: 0; } 15% { opacity: 0.9; } 100% { opacity: 0; } }
+@media (prefers-color-scheme: dark) { .board-item.focus { background: rgba(250, 214, 92, 0.18); } }
+
+/* Filled shapes in a drawing fade in; lines draw themselves on. */
+.fade-shape { animation: rise 0.6s ease-out both; }
+
+/* Fractions inside handwritten lines sit on the line at a readable size. */
+.inline-fraction .katex { font-size: 1.05em; }
+.inline-fraction { display: inline-block; vertical-align: middle; margin: 0 0.15em; }
 
 /* The line the tutor is saying now. */
 .speaking { background: var(--accent-soft); box-shadow: -3px 0 0 var(--accent); padding-left: 0.5rem; }
@@ -105,7 +106,8 @@ body {
 @keyframes think { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise, .draw, .handwrite, .thinking i, .latest::before { animation: none; }
+  .rise, .draw, .handwrite, .thinking i, .fade-shape { animation: none; }
+  .board-item { transition: none; }
 }
 
 /* Maths sits on the board's left margin like the handwriting, not centred. */

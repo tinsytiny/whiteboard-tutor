@@ -5,13 +5,16 @@
 export type LessonMode = "topic" | "homework" | "exam";
 
 export type BoardAction =
-  | { t: "say"; text: string } // spoken line, shown in the transcript
+  | { t: "say"; text: string; mark?: string } // spoken line; mark names the board item it's about, which is highlighted
   | { t: "heading"; text: string }
   | { t: "write"; text: string } // handwritten line on the board
   | { t: "math"; tex: string } // LaTeX, rendered with KaTeX
   | { t: "plot"; fns: string[]; xmin?: number; xmax?: number; label?: string }
   | { t: "table"; head: string[]; rows: string[][] }
   | { t: "note"; text: string } // boxed key point or common trap
+  | { t: "draw"; svg: string; label?: string } // a diagram the tutor draws as simple SVG, cleaned before it is shown
+  | { t: "flow"; steps: string[]; cycle?: boolean } // boxes joined by arrows: a process, a chain of causes, a cycle
+  | { t: "bars"; bars: { parts: number; shaded: number; label?: string }[] } // fraction bars
   | { t: "ask"; text: string } // pause and wait for the student
   | { t: "error"; text: string };
 
@@ -26,7 +29,7 @@ export type Turn =
   | { role: "student"; text: string; files?: Attachment[]; fileNames?: string[]; fileIds?: string[] } // saved lessons keep names and Library ids; the data lives in the Library
   | { role: "tutor"; actions: BoardAction[] };
 
-const KINDS = new Set(["say", "heading", "write", "math", "plot", "table", "note", "ask", "error"]);
+const KINDS = new Set(["say", "heading", "write", "math", "plot", "table", "note", "draw", "flow", "bars", "ask", "error"]);
 
 const isStr = (v: unknown): v is string => typeof v === "string";
 const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
@@ -70,6 +73,21 @@ export function parseAction(line: string): BoardAction | null {
       if (!isStrArr(o.fns) || o.fns.length === 0) return null;
       const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
       return { t: "plot", fns: o.fns.slice(0, 4), xmin: num(o.xmin), xmax: num(o.xmax), label: isStr(o.label) ? o.label : undefined };
+    }
+    case "say":
+      return isStr(o.text) ? { t: "say", text: o.text, ...(isStr(o.mark) && o.mark.trim() ? { mark: o.mark.trim().slice(0, 120) } : {}) } : null;
+    case "draw":
+      return isStr(o.svg) && o.svg.length <= 20_000 && /^\s*<svg[\s>]/i.test(o.svg) ? { t: "draw", svg: o.svg, label: isStr(o.label) ? o.label : undefined } : null;
+    case "flow":
+      return isStrArr(o.steps) && o.steps.length >= 2 ? { t: "flow", steps: o.steps.slice(0, 8), cycle: o.cycle === true } : null;
+    case "bars": {
+      if (!Array.isArray(o.bars)) return null;
+      const bars = o.bars
+        .filter((b): b is Record<string, unknown> => typeof b === "object" && b !== null)
+        .map((b) => ({ parts: Math.round(Number(b.parts)), shaded: Math.round(Number(b.shaded)), label: isStr(b.label) ? b.label : undefined }))
+        .filter((b) => b.parts >= 1 && b.parts <= 24 && b.shaded >= 0 && b.shaded <= b.parts)
+        .slice(0, 4);
+      return bars.length ? { t: "bars", bars } : null;
     }
     case "table":
       return isStrArr(o.head) && Array.isArray(o.rows) && o.rows.every(isStrArr)

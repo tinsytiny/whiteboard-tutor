@@ -16,6 +16,9 @@ export function lessonText(turns: Turn[]): string {
               : a.t === "math" ? `BOARD (maths): ${a.tex}`
               : a.t === "plot" ? `BOARD (graph): ${a.fns.join(", ")}`
               : a.t === "table" ? `BOARD (table): ${[a.head, ...a.rows].map((r) => r.join(" | ")).join(" / ")}`
+              : a.t === "draw" ? `BOARD (diagram): ${a.label ?? "a drawing"}`
+              : a.t === "flow" ? `BOARD (flow): ${a.steps.join(" -> ")}`
+              : a.t === "bars" ? `BOARD (fraction bars): ${a.bars.map((b) => `${b.shaded}/${b.parts}`).join(", ")}`
               : a.t === "error" ? ""
               : `BOARD: ${a.text}`,
             )

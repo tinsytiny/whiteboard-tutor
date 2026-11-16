@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardAction, Turn } from "@/lib/board";
 import { chalk, chime, finale, music, startAudio } from "@/lib/sounds";
 import { canSpeak, prefetchVoice, speak, unlockSpeech } from "@/lib/speech";
-import { isBoardAction, Item } from "./Board";
+import { focusFor, isBoardAction, Item } from "./Board";
 
 // A lesson played back as an explainer video: each question becomes a title
 // card, the board fills in step by step, the tutor's words are spoken and shown
@@ -14,7 +14,7 @@ import { isBoardAction, Item } from "./Board";
 
 type Step =
   | { kind: "title"; text: string; chapter: number }
-  | { kind: "say"; text: string; question: boolean; chapter: number }
+  | { kind: "say"; text: string; question: boolean; chapter: number; mark?: string }
   | { kind: "board"; action: BoardAction; chapter: number };
 
 function stepsOf(turns: Turn[]): Step[] {
@@ -27,7 +27,7 @@ function stepsOf(turns: Turn[]): Step[] {
     } else {
       if (chapter < 0) chapter = 0;
       for (const a of t.actions) {
-        if (a.t === "say" || a.t === "ask") steps.push({ kind: "say", text: a.text, question: a.t === "ask", chapter });
+        if (a.t === "say" || a.t === "ask") steps.push({ kind: "say", text: a.text, question: a.t === "ask", chapter, mark: a.t === "say" ? a.mark : undefined });
         else if (isBoardAction(a)) steps.push({ kind: "board", action: a, chapter });
       }
     }
@@ -63,6 +63,7 @@ export function VideoPlayer({ turns, title, onClose }: { turns: Turn[]; title: s
   const chapters = steps.length ? steps[steps.length - 1].chapter + 1 : 0;
   const shown = steps.slice(0, at + 1).filter((s): s is Extract<Step, { kind: "board" }> => s.kind === "board" && s.chapter === chapter);
   const caption = [...steps.slice(0, at + 1)].reverse().find((s) => s.chapter === chapter && s.kind === "say") as Extract<Step, { kind: "say" }> | undefined;
+  const focus = current?.kind === "say" && !current.question ? focusFor(shown.map((s) => s.action), current.mark) : current?.kind === "board" ? shown.length - 1 : -1;
 
   const stop = useCallback(() => {
     run.current?.abort();
@@ -163,7 +164,7 @@ export function VideoPlayer({ turns, title, onClose }: { turns: Turn[]; title: s
           <div ref={stage} className="board-paper absolute inset-0 overflow-y-auto px-[6%] pb-28 pt-[4%]">
             <div className="flex flex-col gap-3 [&_.board-math]:sm:text-2xl">
               {shown.map((s, i) => (
-                <div key={`${chapter}-${i}`} className="rise" {...(i === shown.length - 1 ? { "data-latest": "" } : {})}>
+                <div key={`${chapter}-${i}`} className={`board-item rise ${i === focus ? "focus" : ""}`} {...(i === shown.length - 1 ? { "data-latest": "" } : {})}>
                   <Item a={s.action} />
                 </div>
               ))}

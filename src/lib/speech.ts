@@ -150,7 +150,9 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
     prefs.engine === "hd" && natural ? clip(text)
     : prefs.engine === "natural" && kokoro.state === "ready" ? naturalClip(text)
     : null;
-  const buffer = source ? await Promise.race([source, new Promise<null>((r) => setTimeout(() => r(null), 12_000))]) : null;
+  // Don't leave a long silence: if the clip isn't ready soon, the device voice says this line.
+  const patience = prefs.engine === "natural" ? 5_000 : 8_000;
+  const buffer = source ? await Promise.race([source, new Promise<null>((r) => setTimeout(() => r(null), patience))]) : null;
   if (signal?.aborted) return;
   // A clip can only be heard once audio was started by a tap (iPad Safari).
   if (buffer && startAudio()?.state === "running") return playClip(buffer, signal);
@@ -160,7 +162,10 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
 // ---- Kokoro, the in-browser natural voice ----
 
 type KokoroState = "idle" | "loading" | "ready" | "failed";
-export const kokoro: { state: KokoroState; progress: number; listeners: Set<() => void> } = { state: "idle", progress: 0, listeners: new Set() };
+export const kokoro: { state: KokoroState; progress: number; slow: boolean; listeners: Set<() => void> } = { state: "idle", progress: 0, slow: false, listeners: new Set() };
+// How long each clip took to make compared with how long it plays. If this
+// device can't keep up, the device voice takes over so lessons don't stall.
+const pace: number[] = [];
 let worker: Worker | null = null;
 let nextId = 0;
 const waiting = new Map<number, (buffer: AudioBuffer | null) => void>();
@@ -188,6 +193,15 @@ export function warmNaturalVoice() {
       const ctx = startAudio();
       if (msg.type === "error" || !ctx) return done(null);
       const samples = msg.samples as Float32Array;
+      if (typeof msg.ms === "number" && samples.length) {
+        pace.push(msg.ms / 1000 / (samples.length / msg.rate));
+        if (pace.length >= 3 && pace.slice(-3).every((r) => r > 1.6)) {
+          kokoro.slow = true;
+          kokoro.state = "failed";
+          changed();
+          console.warn("natural voice too slow on this device", pace.slice(-3));
+        }
+      }
       const buffer = ctx.createBuffer(1, samples.length, msg.rate);
       buffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
       done(buffer);

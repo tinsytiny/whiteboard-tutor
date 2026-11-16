@@ -98,7 +98,7 @@ export function VoiceSettings() {
                 {status.state === "ready" && "Ready. It's saved on this device."}
                 {status.state === "loading" && `Downloading the voice… ${pct}%. Until it's ready, the device voice speaks.`}
                 {status.state === "idle" && "It starts downloading when you tap Test or start a lesson."}
-                {status.state === "failed" && "The natural voice couldn't load in this browser, so the device voice is speaking."}
+                {status.state === "failed" && (kokoro.slow ? "This device makes the natural voice too slowly for a smooth lesson, so the device voice is speaking." : "The natural voice couldn't load in this browser, so the device voice is speaking.")}
               </p>
               {status.state === "loading" && (
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-bg"><div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${pct}%` }} /></div>

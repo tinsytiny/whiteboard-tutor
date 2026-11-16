@@ -23,7 +23,16 @@ export async function GET(request: Request) {
     if (params.get("lesson")) {
       const mode = (["topic", "homework", "exam"] as const).find((m) => m === params.get("mode")) ?? "topic";
       const question = (params.get("q") ?? "What is the derivative of x^3? Keep it short.").slice(0, 400);
-      const run = streamText({ model, system: systemPrompt(mode), prompt: question, maxOutputTokens: 6000, maxRetries: 0, abortSignal: AbortSignal.timeout(55_000) });
+      const think = (["minimal", "low", "medium", "high"] as const).find((t) => t === params.get("think"));
+      const run = streamText({
+        model,
+        system: systemPrompt(mode),
+        prompt: question,
+        maxOutputTokens: 6000,
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(55_000),
+        ...(think ? { providerOptions: { google: { thinkingConfig: { thinkingLevel: think } } } } : {}),
+      });
       let text = "";
       let firstLine = 0;
       for await (const part of run.textStream) {

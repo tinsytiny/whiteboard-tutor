@@ -139,23 +139,38 @@ export function LessonRoom() {
     setFiles(next);
   }, [files]);
 
-  const show = useCallback(async (a: BoardAction, signal: AbortSignal) => {
+  const draw = useCallback((a: BoardAction) => {
+    boardNow.current = [...boardNow.current, a];
+    setBoard(boardNow.current);
+    setFocus(boardNow.current.length - 1);
+  }, []);
+
+  /**
+   * Shows one action. While a line is being spoken, the board item that comes
+   * next (taken with `next`) is written at the same time, like a teacher who
+   * talks while writing, so the lesson flows instead of stopping and starting.
+   */
+  const show = useCallback(async (a: BoardAction, signal: AbortSignal, next?: () => BoardAction | undefined) => {
     if (a.t === "say" || a.t === "ask") {
       setLines((l) => [...l, { who: "tutor", text: a.text, question: a.t === "ask" }]);
       setFocus(a.t === "say" ? focusFor(boardNow.current, a.mark) : -1);
       // Pace the lesson to the speed of speech, so the board keeps step with the voice.
-      if (voiceRef.current) await speak(a.text, signal);
-      else await wait(Math.min(350 + a.text.length * 28, 4200), signal);
+      const speaking = voiceRef.current ? speak(a.text, signal) : wait(Math.min(350 + a.text.length * 28, 4200), signal);
+      let wrote: BoardAction | undefined;
+      const along = a.t === "say" && next ? (async () => {
+        await wait(500, signal);
+        if (!signal.aborted) { wrote = next(); if (wrote) draw(wrote); }
+      })() : Promise.resolve();
+      await Promise.all([speaking, along]);
+      if (wrote) await wait(wrote.t === "plot" || wrote.t === "draw" ? 700 : 250, signal);
     } else if (a.t === "error") {
       setLines((l) => [...l, { who: "problem", text: a.text }]);
     } else if (isBoardAction(a)) {
-      boardNow.current = [...boardNow.current, a];
-      setBoard(boardNow.current);
-      setFocus(boardNow.current.length - 1);
-      await wait(a.t === "plot" || a.t === "draw" ? 1800 : a.t === "flow" || a.t === "bars" ? 1300 : 700, signal);
+      draw(a);
+      await wait(a.t === "plot" || a.t === "draw" ? 1500 : a.t === "flow" || a.t === "bars" ? 1100 : 600, signal);
     }
     if (signal.aborted) throw new DOMException("interrupted", "AbortError");
-  }, []);
+  }, [draw]);
 
   const toggleVoice = () => {
     const next = !voice;
@@ -231,7 +246,12 @@ export function LessonRoom() {
         const a = queue.shift();
         if (a) {
           if (a.t !== "error") shown.push(a);
-          await show(a, ctrl.signal);
+          await show(a, ctrl.signal, () => {
+            if (!queue[0] || !isBoardAction(queue[0])) return undefined;
+            const b = queue.shift()!;
+            shown.push(b);
+            return b;
+          });
         } else if (ended) break;
         else await new Promise<void>((r) => { arrived.wake = r; });
         arrived.wake = null;
@@ -313,7 +333,9 @@ export function LessonRoom() {
           if (ctrl.signal.aborted) throw new DOMException("interrupted", "AbortError");
         } else {
           t.actions.forEach((a) => { if (voiceRef.current && (a.t === "say" || a.t === "ask")) prefetchVoice(a.text); });
-          for (const a of t.actions) await show(a, ctrl.signal);
+          for (let i = 0; i < t.actions.length; i++) {
+            await show(t.actions[i], ctrl.signal, () => (t.actions[i + 1] && isBoardAction(t.actions[i + 1]) ? t.actions[++i] : undefined));
+          }
         }
       }
     } catch {

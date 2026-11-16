@@ -98,9 +98,21 @@ export function VideoPlayer({ turns, title, onClose }: { turns: Turn[]; title: s
             await wait(2600, ctrl.signal);
           } else if (s.kind === "say") {
             if (fx && s.question) chime(false);
-            if (talk && canSpeak()) await speak(s.text, ctrl.signal);
-            else await wait(Math.min(900 + s.text.length * 45, 6000), ctrl.signal);
-            await wait(250, ctrl.signal);
+            const speaking = talk && canSpeak() ? speak(s.text, ctrl.signal) : wait(Math.min(900 + s.text.length * 45, 6000), ctrl.signal);
+            // Write the next board step while this line is spoken, like a teacher talking as they write.
+            const next = steps[i + 1];
+            if (!s.question && next?.kind === "board" && next.chapter === s.chapter) {
+              await wait(500, ctrl.signal);
+              if (ctrl.signal.aborted) return;
+              i++;
+              setAt(i);
+              if (fx) chalk();
+              await speaking;
+              await wait(next.action.t === "plot" || next.action.t === "draw" ? 700 : 300, ctrl.signal);
+            } else {
+              await speaking;
+              await wait(250, ctrl.signal);
+            }
           } else {
             if (fx) chalk();
             await wait(s.action.t === "plot" ? 1800 : 1100, ctrl.signal);

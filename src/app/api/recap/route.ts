@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 import type { Turn } from "@/lib/board";
 import { lessonText, SAMPLE_RECAP, type Recap } from "@/lib/recap";
-import { problemText, tutorIsLive, tutorModel } from "@/lib/tutor";
+import { problemText, restModel, tutorIsLive, tutorModel, tutorModelNames, usesGoogleKey, worthAnotherModel } from "@/lib/tutor";
 
 export const maxDuration = 120;
 
@@ -51,13 +51,27 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { output } = await generateText({
-      model: tutorModel(),
-      system: SYSTEM,
-      prompt: `Here is the lesson.\n\n${text}`,
-      output: Output.object({ schema: RecapSchema }),
-      maxOutputTokens: 4000,
-    });
+    const write = (name?: string) =>
+      generateText({
+        model: tutorModel(name),
+        system: SYSTEM,
+        prompt: `Here is the lesson.\n\n${text}`,
+        output: Output.object({ schema: RecapSchema }),
+        maxOutputTokens: 4000,
+        maxRetries: 0,
+      });
+    // Fall back to the next model when one is out of its free allowance.
+    const names = usesGoogleKey() ? tutorModelNames() : [undefined];
+    let result: Awaited<ReturnType<typeof write>> | null = null;
+    for (let m = 0; m < names.length && !result; m++) {
+      try {
+        result = await write(names[m]);
+      } catch (error) {
+        if (!worthAnotherModel(error) || m === names.length - 1) throw error;
+        restModel(names[m]!, error);
+      }
+    }
+    const output = result!.output;
     const recap = output ? clean(output) : null;
     if (!recap) return Response.json({ error: "The recap could not be written. Try again." }, { status: 502 });
     return Response.json({ recap, sample: false });

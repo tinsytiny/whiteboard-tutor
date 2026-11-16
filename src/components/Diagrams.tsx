@@ -38,6 +38,29 @@ function cleanSvg(raw: string): string | null {
     else if (DRAWN.has(el.nodeName.toLowerCase())) { el.setAttribute("pathLength", "1"); el.classList.add("draw"); }
   };
   walk(root);
+  // Arrows the tutor points at a marker it never drew get a plain arrowhead.
+  const ids = new Set([...root.querySelectorAll("[id]")].map((e) => e.id));
+  const wanted = new Set<string>();
+  root.querySelectorAll("[marker-end],[marker-start]").forEach((e) => {
+    for (const v of [e.getAttribute("marker-end"), e.getAttribute("marker-start")]) {
+      const m = v && /^url\(#([\w-]+)\)$/.exec(v.trim());
+      if (m && !ids.has(m[1])) wanted.add(m[1]);
+    }
+  });
+  if (wanted.size) {
+    const ns = "http://www.w3.org/2000/svg";
+    const defs = doc.createElementNS(ns, "defs");
+    for (const id of wanted) {
+      const marker = doc.createElementNS(ns, "marker");
+      for (const [k, v] of Object.entries({ id, viewBox: "0 0 10 10", refX: "8", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" })) marker.setAttribute(k, v);
+      const tip = doc.createElementNS(ns, "path");
+      tip.setAttribute("d", "M0 0 L10 5 L0 10 z");
+      tip.setAttribute("fill", "context-stroke");
+      marker.appendChild(tip);
+      defs.appendChild(marker);
+    }
+    root.insertBefore(defs, root.firstChild);
+  }
   if (!root.getAttribute("viewBox")) {
     const w = Number(root.getAttribute("width")) || 400;
     const h = Number(root.getAttribute("height")) || 300;

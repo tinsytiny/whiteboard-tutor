@@ -2,7 +2,7 @@ import { streamText, type ModelMessage } from "ai";
 import { ATTACH_MAX_BYTES, ATTACH_MAX_FILES, ATTACH_TYPES, type Attachment, type BoardAction, type LessonMode, type Turn } from "@/lib/board";
 import { demoLesson } from "@/lib/demo";
 import { systemPrompt } from "@/lib/prompt";
-import { problemText, tutorIsLive, tutorModel } from "@/lib/tutor";
+import { problemText, restModel, tutorIsLive, tutorModel, tutorModelNames, usesGoogleKey, worthAnotherModel } from "@/lib/tutor";
 
 export const maxDuration = 300;
 
@@ -85,27 +85,39 @@ export async function POST(req: Request) {
       let timer = setTimeout(() => stall.abort(), STALL_MS);
       const signal = AbortSignal.any([req.signal, stall.signal]);
       try {
-        const run = streamText({
-          model: tutorModel(),
-          system: systemPrompt(mode),
-          messages: toMessages(turns),
-          maxOutputTokens: 8000,
-          abortSignal: signal,
-          onError: ({ error }) => {
-            if (signal.aborted || failed) return;
+        // Try each model in turn. Another model is only tried when the first
+        // failed before saying anything, so a lesson is never written twice.
+        const names = usesGoogleKey() ? tutorModelNames() : [undefined];
+        for (let m = 0; m < names.length; m++) {
+          let sent = false;
+          let problem: unknown = null;
+          const run = streamText({
+            model: tutorModel(names[m]),
+            system: systemPrompt(mode),
+            messages: toMessages(turns),
+            maxOutputTokens: 8000,
+            maxRetries: 0,
+            abortSignal: signal,
+            onError: ({ error }) => { problem = error; },
+          });
+          for await (const text of run.textStream) {
+            clearTimeout(timer);
+            timer = setTimeout(() => stall.abort(), STALL_MS);
+            sent = true;
+            controller.enqueue(enc.encode(text));
+          }
+          if (signal.aborted) break;
+          if (problem) {
+            console.error("tutor error", names[m], problem);
+            if (names[m] && worthAnotherModel(problem)) restModel(names[m]!, problem);
+            if (!sent && m < names.length - 1 && worthAnotherModel(problem)) continue;
             failed = true;
-            console.error("tutor error", error);
-            fail(problemText(error));
-          },
-        });
-        for await (const text of run.textStream) {
-          clearTimeout(timer);
-          timer = setTimeout(() => stall.abort(), STALL_MS);
-          controller.enqueue(enc.encode(text));
-        }
-        controller.enqueue(enc.encode("\n"));
-        if (!failed && !signal.aborted && (await run.finishReason) === "length") {
-          fail("That explanation ran long and was cut off. Ask me to carry on.");
+            fail(problemText(problem));
+            break;
+          }
+          controller.enqueue(enc.encode("\n"));
+          if ((await run.finishReason) === "length") fail("That explanation ran long and was cut off. Ask me to carry on.");
+          break;
         }
       } catch (error) {
         // An abort means the student interrupted, which is not a problem to report.

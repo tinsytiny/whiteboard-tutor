@@ -6,13 +6,27 @@ import type { BoardAction } from "@/lib/board";
 import { Bars, Drawing, Flow } from "./Diagrams";
 import { Plot } from "./Plot";
 
+/** Closes braces the AI forgot to close, a common slip that otherwise breaks the whole line. */
+export function balanceBraces(tex: string): string {
+  let depth = 0;
+  for (let i = 0; i < tex.length; i++) {
+    if (tex[i] === "\\") { i++; continue; }
+    if (tex[i] === "{") depth++;
+    else if (tex[i] === "}" && depth > 0) depth--;
+  }
+  return tex + "}".repeat(depth);
+}
+
 function Maths({ tex }: { tex: string }) {
   const html = useMemo(() => {
-    try {
-      return katex.renderToString(tex, { displayMode: true, throwOnError: true, trust: false, strict: "ignore" });
-    } catch {
-      return null; // maths the renderer can't read is written out as plain text instead of an error
+    for (const attempt of [tex, balanceBraces(tex)]) {
+      try {
+        return katex.renderToString(attempt, { displayMode: true, throwOnError: true, trust: false, strict: "ignore" });
+      } catch {
+        // try the repaired line next
+      }
     }
+    return null; // maths the renderer can't read is written out as plain text instead of an error
   }, [tex]);
   if (html === null) return <p className="font-hand text-2xl leading-10 text-ink">{tex.replace(/\\(text|mathrm|mathbf)\{([^}]*)\}/g, "$2").replace(/[{}]/g, "")}</p>;
   return <div className="board-math overflow-x-auto py-1 text-lg text-ink sm:text-2xl" dangerouslySetInnerHTML={{ __html: html }} />;

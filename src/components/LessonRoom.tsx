@@ -570,7 +570,7 @@ export function LessonRoom() {
             ) : l.who === "problem" ? (
               <p key={i} role="alert" className="rounded-lg border border-danger/40 px-3 py-2 text-danger">{l.text}</p>
             ) : (
-              <div key={i} className="group mr-4 flex items-start gap-1">
+              <div key={i} className={`group mr-4 flex items-start gap-1 rounded-lg transition-colors duration-500 ${busy && i === lines.length - 1 ? "speaking" : ""}`}>
                 <p className={`flex-1 text-text ${l.question ? "font-semibold" : ""}`}><span className="sr-only">Tutor: </span>{l.text}</p>
                 {canTalk && (
                   <button type="button" onClick={() => hear(l.text)} aria-label="Hear this again" className="-mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:text-accent">
@@ -580,7 +580,12 @@ export function LessonRoom() {
               </div>
             ),
           )}
-          {busy && <p className="text-sm text-muted">{replaying ? "Replaying the lesson…" : "Tutor is explaining…"}</p>}
+          {busy && (replaying || lines[lines.length - 1]?.who === "student") && (
+            <p className="flex items-center gap-2 text-sm text-muted" aria-label={replaying ? "Replaying the lesson" : "Your tutor is thinking"}>
+              <span className="thinking" aria-hidden><i /><i /><i /></span>
+              {replaying ? "Replaying the lesson" : "Thinking it through"}
+            </p>
+          )}
           <div ref={logEnd} />
         </div>
         <div className="space-y-2 border-t border-border p-3">

@@ -6,10 +6,14 @@ import type { BoardAction } from "@/lib/board";
 import { Plot } from "./Plot";
 
 function Maths({ tex }: { tex: string }) {
-  const html = useMemo(
-    () => katex.renderToString(tex, { displayMode: true, throwOnError: false, trust: false, strict: "ignore" }),
-    [tex],
-  );
+  const html = useMemo(() => {
+    try {
+      return katex.renderToString(tex, { displayMode: true, throwOnError: true, trust: false, strict: "ignore" });
+    } catch {
+      return null; // maths the renderer can't read is written out as plain text instead of an error
+    }
+  }, [tex]);
+  if (html === null) return <p className="font-hand text-2xl leading-10 text-ink">{tex.replace(/\\(text|mathrm|mathbf)\{([^}]*)\}/g, "$2").replace(/[{}]/g, "")}</p>;
   return <div className="board-math overflow-x-auto py-1 text-base text-ink sm:text-xl" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -57,7 +61,11 @@ export function Board({ actions, empty }: { actions: BoardAction[]; empty: strin
         <p className="font-hand text-2xl leading-10 text-muted">{empty}</p>
       ) : (
         <div className="flex flex-col gap-3">
-          {actions.map((a, i) => <div key={i} className="rise"><Item a={a} /></div>)}
+          {actions.map((a, i) => (
+            <div key={i} className={`${a.t === "write" || a.t === "heading" || a.t === "note" ? "handwrite" : "rise"} ${i === actions.length - 1 ? "latest" : ""}`}>
+              <Item a={a} />
+            </div>
+          ))}
         </div>
       )}
       <div ref={end} className="h-6" />

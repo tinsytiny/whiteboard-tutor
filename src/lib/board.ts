@@ -31,13 +31,34 @@ const KINDS = new Set(["say", "heading", "write", "math", "plot", "table", "note
 const isStr = (v: unknown): v is string => typeof v === "string";
 const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
 
+/**
+ * The AI sometimes writes LaTeX with single backslashes inside JSON, so
+ * "\\frac" arrives as "\frac", which JSON would read as a form feed plus
+ * "rac" (and "\\sqrt" would not parse at all). This doubles any backslash that
+ * starts a LaTeX command, and leaves real JSON escapes alone.
+ */
+export function repairLatexEscapes(json: string): string {
+  let out = "";
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (c !== "\\") { out += c; continue; }
+    const next = json[i + 1] ?? "";
+    if (next === "\\" || next === '"' || next === "/") { out += c + next; i++; continue; }
+    if (next === "u" && /^[0-9a-fA-F]{4}$/.test(json.slice(i + 2, i + 6))) { out += c; continue; }
+    const isLetter = /[a-zA-Z]/.test(next);
+    const shortEscape = "bfnrt".includes(next) && next !== "" && !/[a-zA-Z]/.test(json[i + 2] ?? "");
+    out += isLetter && !shortEscape ? "\\\\" : isLetter ? c : "\\\\";
+  }
+  return out;
+}
+
 /** Parse one line of tutor output. Anything malformed is dropped, never drawn. */
 export function parseAction(line: string): BoardAction | null {
   const s = line.trim();
   if (!s.startsWith("{")) return null;
   let o: Record<string, unknown>;
   try {
-    o = JSON.parse(s);
+    o = JSON.parse(repairLatexEscapes(s));
   } catch {
     return null;
   }
